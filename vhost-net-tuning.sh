@@ -211,10 +211,8 @@ echo "### vHost Net Tuning successfully completed at $(date)" |& tee -a ${_LOGS}
 #- port: {get_resource: VSFO-4_BP-1}
 #- port: {get_resource: VSFO-4_BP-2}
 #- port: {get_resource: VSFO-4_VFAB-1}
-#- port: {get_resource: VSFO-4_VFAB-2}
 #- port: {get_resource: VSFO-4_DBG}
 #- port: {get_resource: VSFO-4_VSFO-4_EXT-1}
-#- port: {get_resource: VSFO-4_VSFO-4_EXT-2}
 #
 # virsh domiflist instance-000016dc
 #Interface  Type       Source     Model       MAC
@@ -222,24 +220,18 @@ echo "### vHost Net Tuning successfully completed at $(date)" |& tee -a ${_LOGS}
 #tap09c79116-eb ethernet   -          virtio      02:00:00:01:04:01 <-- BP-1
 #tap49798b60-f7 ethernet   -          virtio      02:00:00:01:04:fe <-- BP-2
 #tap9fdcb8b0-61 ethernet   -          virtio      02:00:00:04:04:02 <-- VFAB-1
-#tap66a6e1bf-5d ethernet   -          virtio      02:00:00:04:04:03 <-- VFAB-2
 #tape8260770-0e ethernet   -          virtio      00:01:00:0a:04:ff <-- DBG
 #tapaf28e29f-f3 ethernet   -          virtio      02:af:28:e2:9f:f3 <-- EXT-1
-#tap43362406-88 ethernet   -          virtio      02:43:36:24:06:88 <-- EXT-2
 #
 #Average:      UID       PID    %usr %system  %guest    %CPU   CPU  Command
 #Average:        0      6003    0.00    0.08    0.00    0.08     -  vhost-33554 <-- BP-1
 #Average:        0      6004    0.00    0.08    0.00    0.08     -  vhost-33554 <-- BP-2
 #Average:        0      6005    0.00   18.30    0.00   18.30     -  vhost-33554 <-- VFAB-1
-#Average:        0      6006    0.00   17.26    0.00   17.26     -  vhost-33554 <-- VFAB-2
-#Average:        0      6007    0.00    0.00    0.00    0.00     -  vhost-33554 <-- DBG
-#Average:        0      6008    0.00   34.71    0.00   34.71     -  vhost-33554 <-- EXT-1
-#Average:        0      6009    0.00   35.69    0.00   35.69     -  vhost-33554 <-- EXT-2
+#Average:        0      6006    0.00    0.00    0.00    0.00     -  vhost-33554 <-- DBG
+#Average:        0      6007    0.00   34.71    0.00   34.71     -  vhost-33554 <-- EXT-1
 #
 #  6003   OTHER     0 0xf00000f   2329466           17      vhost-5999 <-- BP-1
 #  6004   OTHER     0 0xf00000f   1647242            9      vhost-5999 <-- BP-2
 #  6005   OTHER     0 0xf00000f  19675949        17210      vhost-5999 <-- VFAB-1
-#  6006   OTHER     0 0xf00000f  19079031        17229      vhost-5999 <-- VFAB-2
-#  6007   OTHER     0 0xf00000f        63            1      vhost-5999 <-- DBG
-#  6008   OTHER     0 0xf00000f  29258258        22495      vhost-5999 <-- EXT-1
-#  6009   OTHER     0 0xf00000f  27738633        22738      vhost-5999 <-- EXT-2
+#  6006   OTHER     0 0xf00000f        63            1      vhost-5999 <-- DBG
+#  6007   OTHER     0 0xf00000f  29258258        22495      vhost-5999 <-- EXT-1
