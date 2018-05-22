@@ -205,7 +205,6 @@ do
 	fi
 done
 echo "### vHost Net Tuning successfully completed at $(date)" |& tee -a ${_LOGS}
-exit 0
 
 # Typical vHOST-NET Allocation
 # HEAT HOT Template port allocation
