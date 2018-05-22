@@ -52,7 +52,7 @@ _PINBP2NUMA1="3"
 _BPPINNING=true
 
 ###### Enable IRQ PINNING
-_IRQPINNNG=true
+_IRQPINNING=true
 
 _NAMEPATTERN="^.*VSFO.*$"
 _PROJECTPATTERN="EPC-Ericsson|admin"
