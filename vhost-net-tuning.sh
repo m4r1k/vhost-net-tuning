@@ -130,7 +130,7 @@ do
 		if [[ "$(virsh numatune ${_DOMAIN} | awk '/numa_nodeset/ {print $3}')" == "0" ]]; then
 			# Check the QEMU Emulation Threads affinity and don't do anything if it already has the right one
 			# Virsh CLI is NOT idempotent.
-			if ! $(virsh emulatorpin --domain ${_DOMAIN} | grep -q ${_QEMUCORESNUMA0}); then
+			if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep ${_QEMUCORESNUMA0} | awk '{print $2}')" != "${_QEMUCORESNUMA0}" ]]; then
 				echo "### QEMU Emulation Threads affinity on CPU Cores ${_QEMUCORESNUMA0} on NUMA0 for VM ${_NAME}" |& tee -a ${_LOGS}
 				virsh emulatorpin --domain ${_DOMAIN} --cpulist ${_QEMUCORESNUMA0} --live |& tee -a ${_LOGS}
 			fi
@@ -171,7 +171,7 @@ do
 			taskset -pc ${_PINEXT1NUMA0} ${_PIDEXT1NUMA0} |& tee -a ${_LOGS}
 		elif [[ "$(virsh numatune ${_DOMAIN} | awk '/numa_nodeset/ {print $3}')" == "1" ]]; then
 			# Do the same on NUMA1 VNF
-			if ! $(virsh emulatorpin --domain ${_DOMAIN} | grep -q ${_QEMUCORESNUMA1}); then
+			if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep ${_QEMUCORESNUMA1} | awk '{print $2}')" != "${_QEMUCORESNUMA1}" ]]; then
 				# Do general process affinity for all QEMU Emulation Threads
 				echo "### QEMU Emulation Threads affinity on CPU Cores ${_QEMUCORESNUMA1} on NUMA1 for VM ${_NAME}" |& tee -a ${_LOGS}
 				virsh emulatorpin --domain ${_DOMAIN} --cpulist ${_QEMUCORESNUMA1} --live |& tee -a ${_LOGS}
