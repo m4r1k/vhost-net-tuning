@@ -58,7 +58,7 @@ main()
 	###### RegEx for VNF Project Name ######
 	_PROJECTPATTERN="EPC-Ericsson|admin"
 
-	_MQDONE=false
+	_COMPUTETUNING=false
 	
 	# For each KVM Domain do the following
 	for _DOMAIN in $(virsh list | awk '/running/ {print $2}')
@@ -79,7 +79,7 @@ main()
 
 			echo "### This Compute node has an Ericsson vEPG running - ${_NAME}" |& tee -a ${_LOGS}
 
-			if ! ${_MQDONE}; then
+			if ! ${_COMPUTETUNING}; then
 				# Move to function for disable_multiqueue
 				disable_multiqueue
 
@@ -87,6 +87,12 @@ main()
 					# Move to function for irq_pinning
 					irq_pinning
 				fi
+
+				# Move to function for disable_ksm
+				disable_ksm
+
+				# Make sure to not re-executure this section of function more then one
+				_COMPUTETUNING=true
 			fi
 	
 			# Take the KVM Domain PID
@@ -138,7 +144,6 @@ disable_multiqueue()
 			/sbin/ip link set up ${_SLAVE} |& tee -a ${_LOGS}
 		fi
 	done
-	_MQDONE=true
 	echo "### Finished Disable MultiQueue at $(date)" |& tee -a ${_LOGS}
 }
 
@@ -183,6 +188,25 @@ irq_pinning()
 		tuna --irqs=${_IRQLIST} --cpus=${_IRQCORE} --move |& tee -a ${_LOGS}
 	fi
 	echo "### Finished IRQ Pinning at $(date)" |& tee -a ${_LOGS}
+}
+
+disable_ksm()
+{
+	echo "### Starting Disable KSM at $(date)" |& tee -a ${_LOGS}
+	# Disable KSM in the Compute Node
+	/bin/systemctl is-enabled ksm.service |& tee -a ${_LOGS}
+	if [[ "$?" == "0" ]]; then
+		echo "### Disabling KSM Service" |& tee -a ${_LOGS}
+		/bin/systemctl disable ksm.service |& tee -a ${_LOGS}
+		/bin/systemctl stop ksm.service |& tee -a ${_LOGS}
+	fi
+	/bin/systemctl is-enabled ksmtuned.service |& tee -a ${_LOGS}
+	if [[ "$?" == "0" ]]; then
+		echo "### Disabling KSMTUNED Service" |& tee -a ${_LOGS}
+		/bin/systemctl disable ksmtuned.service |& tee -a ${_LOGS}
+		/bin/systemctl stop ksmtuned.service |& tee -a ${_LOGS}
+	fi
+	echo "### Finished Disable KSM at $(date)" |& tee -a ${_LOGS}
 }
 
 qemu_affinity()
