@@ -191,7 +191,7 @@ irq_pinning()
 	for _SINGLEIRQ in ${_IRQLIST}
 	do
 		if [[ "$(tuna --show_irqs | awk -v irq=${_SINGLEIRQ} '{if ($1 == irq) {print $3}}')" != "${_IRQCORE}" ]]; then
-			echo "### Pinning ${_SINGLEIRQ} to CPU Core ${_IRQCORE}" |& tee -a ${_LOGS}
+			echo "### Pinning IRQ ${_SINGLEIRQ} to CPU Core ${_IRQCORE}" |& tee -a ${_LOGS}
 			# Do IRQ Affinity
 			tuna --irqs=${_SINGLEIRQ} --cpus=${_IRQCORE} --move |& tee -a ${_LOGS}
 		fi
