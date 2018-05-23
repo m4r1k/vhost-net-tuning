@@ -192,20 +192,19 @@ irq_pinning()
 
 disable_ksm()
 {
-	echo "### Starting Disable KSM at $(date)" |& tee -a ${_LOGS}
 	# Disable KSM in the Compute Node
-	/bin/systemctl is-enabled ksm.service |& tee -a ${_LOGS}
-	if [[ "$?" == "0" ]]; then
-		echo "### Disabling KSM Service" |& tee -a ${_LOGS}
-		/bin/systemctl disable ksm.service |& tee -a ${_LOGS}
-		/bin/systemctl stop ksm.service |& tee -a ${_LOGS}
-	fi
-	/bin/systemctl is-enabled ksmtuned.service |& tee -a ${_LOGS}
-	if [[ "$?" == "0" ]]; then
-		echo "### Disabling KSMTUNED Service" |& tee -a ${_LOGS}
-		/bin/systemctl disable ksmtuned.service |& tee -a ${_LOGS}
-		/bin/systemctl stop ksmtuned.service |& tee -a ${_LOGS}
-	fi
+	echo "### Starting Disable KSM at $(date)" |& tee -a ${_LOGS}
+	for _SERVICE in "ksm.service" "ksmtuned.service"
+	do
+		/bin/systemctl is-enabled ${_SERVICE} > ${_LOGS} 2>&1
+		if [[ "$?" == "0" ]]; then
+			echo "### Disabling ${_SERVICE}" |& tee -a ${_LOGS}
+			/bin/systemctl disable ${_SERVICE} |& tee -a ${_LOGS}
+			/bin/systemctl stop ${_SERVICE} |& tee -a ${_LOGS}
+		else
+			echo "### Service ${_SERVICE} already disabled" |& tee -a ${_LOGS}
+		fi
+	done
 	echo "### Finished Disable KSM at $(date)" |& tee -a ${_LOGS}
 }
 
