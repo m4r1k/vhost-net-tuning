@@ -27,6 +27,8 @@ main()
 		exit 0
 	fi
 	
+	###### Enable IRQ PINNING ######
+	_IRQPINNING=true
 	###### IRQ Pinning ######
 	_IRQCORE="1"
 	###### QEMU Emulation Thread Process Affinity for NUMA0 ######
@@ -49,164 +51,196 @@ main()
 	_PINBP1NUMA1="2"
 	###### QEMU vHost-Net BP2 Process Pinning for NUMA1 ######
 	_PINBP2NUMA1="3"
-	
-	###### Enable BP1 and BP2 CPU Pinning
+	###### Enable BP1 and BP2 CPU Pinning ######
 	_BPPINNING=true
-	
-	###### Enable IRQ PINNING
-	_IRQPINNING=true
-	
+	###### RegEx for VNF Name ######
 	_NAMEPATTERN="^.*VSFO.*$"
+	###### RegEx for VNF Project Name ######
 	_PROJECTPATTERN="EPC-Ericsson|admin"
+
+	_MQDONE=false
 	
 	# For each KVM Domain do the following
 	for _DOMAIN in $(virsh list | awk '/running/ {print $2}')
 	do
-		echo -e "##########\n### vHost Net Tuning initialized at $(date)" |& tee -a ${_LOGS}
-		# Before doing anything, check if the VNF is a VSFO and the Project name as well
+		echo "##########" |& tee -a ${_LOGS}
+		echo "### vHost Net Tuning initialized at $(date)" |& tee -a ${_LOGS}
+
+		# Get VM Name and check it against a RegEx
 		_NAME=$(virsh dumpxml ${_DOMAIN} | grep nova:name | sed -e 's/<[^>]*>//g' -e 's/  //g')
-		_PROJECT=$(virsh dumpxml ${_DOMAIN} | grep nova:project | sed -e 's/<[^>]*>//g' -e 's/  //g')
 		_NAMESTATUS=$(echo ${_NAME} | grep -E -q "${_NAMEPATTERN}" && echo true || echo false)
+
+		# Get VM Project Name and check it against a RegEx
+		_PROJECT=$(virsh dumpxml ${_DOMAIN} | grep nova:project | sed -e 's/<[^>]*>//g' -e 's/  //g')
 		_PROJECTSTATUS=$(echo ${_PROJECT} | grep -E -q "${_PROJECTPATTERN}" && echo true || echo false)
+
 		# If both NAME and PROJECT match the defined criterias go ahead
 		if ${_NAMESTATUS} && ${_PROJECTSTATUS}; then
+
 			echo "### This Compute node has an Ericsson vEPG running - ${_NAME}" |& tee -a ${_LOGS}
-			# Disable Multi-Queue for every physical interface member of the bond
-			_IRQBALANCE_ARGS="IRQBALANCE_ARGS=\""
-			_IRQLIST=""
-			_BOND=$(vif list --get 0 | awk '/vif0\/0/ {print $3}')
-			for _SLAVE in $(cat /sys/class/net/${_BOND}/bonding/slaves);
-			do
-				echo "### Disabling MultiQueue for ${_BOND} interface ${_SLAVE}" |& tee -a ${_LOGS}
-				_MQCONFIG=$(/sbin/ethtool --show-channels ${_SLAVE} | grep -A4 "Current hardware settings" | awk '/Combined/ {print $2}')
-				if [[ "${_MQCONFIG}" != "1" ]]; then
-					# Print the current configuration
-					/sbin/ethtool --show-channels ${_SLAVE} |& tee -a ${_LOGS}
-					# Disable multiqueue
-					/sbin/ethtool --set-channels ${_SLAVE} combined 1 |& tee -a ${_LOGS}
-					# shutdown the interface in order make sure the multiqueue config is effective
-					/sbin/ip link set down ${_SLAVE} |& tee -a ${_LOGS}
-					# Sleep to make sure everything is down
-					sleep 5s
-					# Restore the interface state
-					/sbin/ip link set up ${_SLAVE} |& tee -a ${_LOGS}
-				fi
-				for _IRQ in $(tuna --show_irqs | grep ${_SLAVE} | awk '{print $1}')
-				do
-					# Create the IRQ Balancer Ban configuration
-					_IRQBALANCE_ARGS="$(echo ${_IRQBALANCE_ARGS} --banirq=${_IRQ})"
-					# Generate the list of IRQs
-					if [[ "${_IRQLIST}" == "" ]]; then
-						_IRQLIST="$(echo ${_IRQ})"
-					else
-						_IRQLIST="$(echo ${_IRQLIST},${_IRQ})"
-					fi
-				done
-			done
-			_IRQBALANCE_ARGS="$(echo ${_IRQBALANCE_ARGS}\")"
-			if ${_IRQPINNING}; then
-				echo "### IRQ Pinning for any interface in the ${_BOND} LAG" |& tee -a ${_LOGS}
-				# Verify if IRQBalancer has the current IRQ Balancer Ban configuration
-				grep -q -E "${_IRQBALANCE_ARGS}" /etc/sysconfig/irqbalance
-				if [[ "$?" != "0" ]]; then
-					# Verify if there aren't any previous old configuration and removing it
-					grep -q -E "^IRQBALANCE_ARGS=.*$" /etc/sysconfig/irqbalance
-					if [[ "$?" != "0" ]]; then
-						sed -e "s/^IRQBALANCE_ARGS=.*$//g" -i /etc/sysconfig/irqbalance
-					fi
-					# Inject good IRQ Balancer ban configuration
-					echo "${_IRQBALANCE_ARGS}" >> /etc/sysconfig/irqbalance
-					# Restart IRQ Balancer
-					systemctl restart irqbalance.service |& tee -a ${_LOGS}
-					# Wait a few seconds
-					sleep 5s
-					# Do IRQ Affinity
-					tuna --irqs=${_IRQLIST} --cpus=${_IRQCORE} --move |& tee -a ${_LOGS}
+
+			if ! ${_MQDONE}; then
+				# Move to function for disable_multiqueue
+				disable_multiqueue
+
+				if ${_IRQPINNING}; then
+					# Move to function for irq_pinning
+					irq_pinning
 				fi
 			fi
 	
 			# Take the KVM Domain PID
 			_DOMAINPID=$(ps aux | grep ${_DOMAIN} | grep -v grep | awk '{print $2}')
-	
-			# Check if the KVM Domain is on NUMA0 or on NUMA1
-			if [[ "$(virsh numatune ${_DOMAIN} | awk '/numa_nodeset/ {print $3}')" == "0" ]]; then
-				# Check the QEMU Emulation Threads affinity and don't do anything if it already has the right one
-				# Virsh CLI is NOT idempotent.
-				if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep ${_QEMUCORESNUMA0} | awk '{print $2}')" != "${_QEMUCORESNUMA0}" ]]; then
-					echo "### QEMU Emulation Threads affinity on CPU Cores ${_QEMUCORESNUMA0} on NUMA0 for VM ${_NAME}" |& tee -a ${_LOGS}
-					virsh emulatorpin --domain ${_DOMAIN} --cpulist ${_QEMUCORESNUMA0} --live |& tee -a ${_LOGS}
-				fi
-	
-				# The vHost-Net kernel thread has the following format
-				# vhost-<KVM Domain main PID>
-				# Given this, look for any vHost-Net PID, the output from tuna is already sorted by PID, but do it again
-				# Each line represents a specific vHost-Net process, and the current order is the following:
-				# 1st and 2nd are BP Network, 3rd is vFAB, 4th is DB and lastly 5th is Ext
-				if ${_BPPINNING}; then
-					_PIDBP1NUMA0=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 1p)
-					_PIDBP2NUMA0=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 2p)
-				fi
-				_PIDVFAB1NUMA0=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 3p)
-				_PIDEXT1NUMA0=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 5p)
-	
-				# For each vHost-Net PID, add it to the CGROUP CPU and then change the process scheduling from SCHED_OTHER priority 0 to SCHED_FIFO priority 99
-				# The For loop ignore empty variables, if BP Pinning is disabled where will not be any error
-				for _VHOSTPID in ${_PIDBP1NUMA0} ${_PIDBP2NUMA0} ${_PIDVFAB1NUMA0} ${_PIDEXT1NUMA0}
-				do
-					echo "### Set SCHED_FIFO for vHost NET Kernel Threads having PID ${_VHOSTPID} for VM ${_NAME}" |& tee -a ${_LOGS}
-					# Both cgclassify and tuna are idempotent.
-					cgclassify -g cpu:/ ${_VHOSTPID} |& tee -a ${_LOGS}
-					tuna --threads=${_VHOSTPID} --priority=FIFO:99 |& tee -a ${_LOGS}
-				done
-	
-				# Lastly, do CPU Pinning for each vHost-Net PID as per the static CPU Mapping defined above
-				# Taskset is idempotent.
-				if ${_BPPINNING}; then
-					echo "### CPU Pinning for BP1 on CPU Core ${_PINBP1NUMA0} for VM ${_NAME}" |& tee -a ${_LOGS}
-					taskset -pc ${_PINBP1NUMA0} ${_PIDBP1NUMA0} |& tee -a ${_LOGS}
-					echo "### CPU Pinning for BP2 on CPU Core ${_PINBP2NUMA0} for VM ${_NAME}" |& tee -a ${_LOGS}
-					taskset -pc ${_PINBP2NUMA0} ${_PIDBP2NUMA0} |& tee -a ${_LOGS}
-				fi
-				echo "### CPU Pinning for vFAB on CPU Core ${_PINVFAB1NUMA0} for VM ${_NAME}" |& tee -a ${_LOGS}
-				taskset -pc ${_PINVFAB1NUMA0} ${_PIDVFAB1NUMA0} |& tee -a ${_LOGS}
-				echo "### CPU Pinning for EXT on CPU Core ${_PINEXT1NUMA0} for VM ${_NAME}" |& tee -a ${_LOGS}
-				taskset -pc ${_PINEXT1NUMA0} ${_PIDEXT1NUMA0} |& tee -a ${_LOGS}
-			elif [[ "$(virsh numatune ${_DOMAIN} | awk '/numa_nodeset/ {print $3}')" == "1" ]]; then
-				# Do the same on NUMA1 VNF
-				if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep ${_QEMUCORESNUMA1} | awk '{print $2}')" != "${_QEMUCORESNUMA1}" ]]; then
-					# Do general process affinity for all QEMU Emulation Threads
-					echo "### QEMU Emulation Threads affinity on CPU Cores ${_QEMUCORESNUMA1} on NUMA1 for VM ${_NAME}" |& tee -a ${_LOGS}
-					virsh emulatorpin --domain ${_DOMAIN} --cpulist ${_QEMUCORESNUMA1} --live |& tee -a ${_LOGS}
-				fi
-	
-				if ${_BPPINNING}; then
-					_PIDBP1NUMA1=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 1p)
-					_PIDBP2NUMA1=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 2p)
-				fi
-				_PIDVFAB1NUMA1=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 3p)
-				_PIDEXT1NUMA1=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 5p)
-	
-				for _VHOSTPID in ${_PIDBP1NUMA1} ${_PIDBP2NUMA1} ${_PIDVFAB1NUMA1} ${_PIDEXT1NUMA1}
-				do
-					echo "### Set SCHED_FIFO for vHost NET Kernel Threads having PID ${_VHOSTPID} for VM ${_NAME}" |& tee -a ${_LOGS}
-					cgclassify -g cpu:/ ${_VHOSTPID}
-					tuna --threads=${_VHOSTPID} --priority=FIFO:99
-				done
-	
-				if ${_BPPINNING}; then
-					echo "### CPU Pinning for BP1 on CPU Core ${_PINBP1NUMA1} for VM ${_NAME}" |& tee -a ${_LOGS}
-					taskset -pc ${_PINBP1NUMA1} ${_PIDBP1NUMA1}
-					echo "### CPU Pinning for BP2 on CPU Core ${_PINBP1NUMA1} for VM ${_NAME}" |& tee -a ${_LOGS}
-					taskset -pc ${_PINBP2NUMA1} ${_PIDBP2NUMA1}
-				fi
-				echo "### CPU Pinning for vFAB on CPU Core ${_PINVFAB1NUMA1} for VM ${_NAME}" |& tee -a ${_LOGS}
-				taskset -pc ${_PINVFAB1NUMA1} ${_PIDVFAB1NUMA1}
-				echo "### CPU Pinning for EXT on CPU Core ${_PINEXT1NUMA1} for VM ${_NAME}" |& tee -a ${_LOGS}
-				taskset -pc ${_PINEXT1NUMA1} ${_PIDEXT1NUMA1}
+
+			# Check if the KVM Domain is either on NUMA0 or on NUMA1
+			_NUMA=$(virsh numatune ${_DOMAIN} | awk '/numa_nodeset/ {print $3}')
+			if [[ "${_NUMA}" == "0" ]]; then
+
+				# Move to function for qemu_affinity
+				qemu_affinity ${_QEMUCORESNUMA0} ${_NUMA}
+
+				# Move to function for vhost_pinning
+				vhost_pinning ${_PINBP1NUMA0} ${_PINBP2NUMA0} ${_PINVFAB1NUMA0} ${_PINEXT1NUMA0}
+
+			elif [[ "${_NUMA}" == "1" ]]; then
+
+				# Move to function for qemu_affinity
+				qemu_affinity ${_QEMUCORESNUMA1} ${_NUMA}
+
+				# Move to function for vhost_pinning
+				vhost_pinning ${_PINBP1NUMA1} ${_PINBP2NUMA1} ${_PINVFAB1NUMA1} ${_PINEXT1NUMA1}
+
 			fi
 		fi
 	done
 	echo "### vHost Net Tuning successfully completed at $(date)" |& tee -a ${_LOGS}
+}
+
+disable_multiqueue()
+{
+	echo "### Starting Disable MultiQueue at $(date)" |& tee -a ${_LOGS}
+	# Disable Multi-Queue for every physical interface member of the bond
+	_BOND=$(vif list --get 0 | awk '/vif0\/0/ {print $3}')
+	for _SLAVE in $(cat /sys/class/net/${_BOND}/bonding/slaves);
+	do
+		echo "### Disabling MultiQueue for ${_BOND} interface ${_SLAVE}" |& tee -a ${_LOGS}
+		_MQCONFIG=$(/sbin/ethtool --show-channels ${_SLAVE} | grep -A4 "Current hardware settings" | awk '/Combined/ {print $2}')
+		if [[ "${_MQCONFIG}" != "1" ]]; then
+			# Print the current configuration
+			/sbin/ethtool --show-channels ${_SLAVE} |& tee -a ${_LOGS}
+			# Disable multiqueue
+			/sbin/ethtool --set-channels ${_SLAVE} combined 1 |& tee -a ${_LOGS}
+			# shutdown the interface in order make sure the multiqueue config is effective
+			/sbin/ip link set down ${_SLAVE} |& tee -a ${_LOGS}
+			# Sleep to make sure everything is down
+			sleep 5s
+			# Restore the interface state
+			/sbin/ip link set up ${_SLAVE} |& tee -a ${_LOGS}
+		fi
+	done
+	_MQDONE=true
+	echo "### Finished Disable MultiQueue at $(date)" |& tee -a ${_LOGS}
+}
+
+irq_pinning()
+{
+	echo "### Starting IRQ Pinning at $(date)" |& tee -a ${_LOGS}
+	_IRQBALANCE_ARGS="IRQBALANCE_ARGS=\""
+	_IRQLIST=""
+	_BOND=$(vif list --get 0 | awk '/vif0\/0/ {print $3}')
+	for _SLAVE in $(cat /sys/class/net/${_BOND}/bonding/slaves);
+	do
+		for _IRQ in $(tuna --show_irqs | grep ${_SLAVE} | awk '{print $1}')
+		do
+			# Create the IRQ Balancer Ban configuration
+			_IRQBALANCE_ARGS="$(echo ${_IRQBALANCE_ARGS} --banirq=${_IRQ})"
+
+			# Generate the list of IRQs
+			if [[ "${_IRQLIST}" == "" ]]; then
+				_IRQLIST="$(echo ${_IRQ})"
+			else
+				_IRQLIST="$(echo ${_IRQLIST},${_IRQ})"
+			fi
+		done
+	done
+	_IRQBALANCE_ARGS="$(echo ${_IRQBALANCE_ARGS}\")"
+	echo "### IRQ Pinning for any interface in the ${_BOND} LAG" |& tee -a ${_LOGS}
+	# Verify if IRQBalancer has the current IRQ Balancer Ban configuration
+	grep -q -E "${_IRQBALANCE_ARGS}" /etc/sysconfig/irqbalance
+	if [[ "$?" != "0" ]]; then
+		# Verify if there aren't any previous old configuration and removing it
+		grep -q -E "^IRQBALANCE_ARGS=.*$" /etc/sysconfig/irqbalance
+		if [[ "$?" != "0" ]]; then
+			sed -e "s/^IRQBALANCE_ARGS=.*$//g" -i /etc/sysconfig/irqbalance
+		fi
+		# Inject good IRQ Balancer ban configuration
+		echo "${_IRQBALANCE_ARGS}" >> /etc/sysconfig/irqbalance
+		# Restart IRQ Balancer
+		systemctl restart irqbalance.service |& tee -a ${_LOGS}
+		# Wait a few seconds
+		sleep 5s
+		# Do IRQ Affinity
+		tuna --irqs=${_IRQLIST} --cpus=${_IRQCORE} --move |& tee -a ${_LOGS}
+	fi
+	echo "### Finished IRQ Pinning at $(date)" |& tee -a ${_LOGS}
+}
+
+qemu_affinity()
+{
+	echo "### Starting QEMU EMulation Thread Affinity at $(date)" |& tee -a ${_LOGS}
+	_QEMUCORES=$1
+	_NUMA=$2
+	# Check the QEMU Emulation Threads affinity and don't do anything if it already has the right one
+	# Virsh CLI is NOT idempotent.
+	if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep ${_QEMUCORES} | awk '{print $2}')" != "${_QEMUCORES}" ]]; then
+		echo "### QEMU Emulation Threads affinity on CPU Cores ${_QEMUCORES} on NUMA${_NUMA} for VM ${_NAME}" |& tee -a ${_LOGS}
+		virsh emulatorpin --domain ${_DOMAIN} --cpulist ${_QEMUCORES} --live |& tee -a ${_LOGS}
+	fi
+	echo "### Finished QEMU EMulation Thread Affinity at $(date)" |& tee -a ${_LOGS}
+}
+
+vhost_pinning()
+{
+	echo "### Starting vHost CPU Pinning at $(date)" |& tee -a ${_LOGS}
+	_PINBP1=$1
+	_PINBP2=$2
+	_PINVFAB1=$3
+	_PINEXT1=$4
+	# The vHost-Net kernel thread has the following format
+	# vhost-<KVM Domain main PID>
+	# Given this, look for any vHost-Net PID, the output from tuna is already sorted by PID, but do it again
+	# Each line represents a specific vHost-Net process, and the current order is the following:
+	# 1st and 2nd are BP Network, 3rd is vFAB, 4th is DB and lastly 5th is Ext
+	if ${_BPPINNING}; then
+		_PIDBP1=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 1p)
+		_PIDBP2=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 2p)
+	fi
+	_PIDVFAB1=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 3p)
+	_PIDEXT1=$(tuna -P | grep vhost-${_DOMAINPID} | awk '{print $1}' | sort -k1n | sed -n 5p)
+
+	# For each vHost-Net PID, add it to the CGROUP CPU and then change the process scheduling from SCHED_OTHER priority 0 to SCHED_FIFO priority 99
+	# The For loop ignore empty variables, if BP Pinning is disabled where will not be any error
+	for _VHOSTPID in ${_PIDBP1} ${_PIDBP2} ${_PIDVFAB1} ${_PIDEXT1}
+	do
+		echo "### Set SCHED_FIFO for vHost NET Kernel Threads having PID ${_VHOSTPID} for VM ${_NAME}" |& tee -a ${_LOGS}
+		# Both cgclassify and tuna are idempotent.
+		cgclassify -g cpu:/ ${_VHOSTPID} |& tee -a ${_LOGS}
+		tuna --threads=${_VHOSTPID} --priority=FIFO:99 |& tee -a ${_LOGS}
+	done
+
+	# Lastly, do CPU Pinning for each vHost-Net PID as per the static CPU Mapping defined above
+	# Taskset is idempotent.
+	if ${_BPPINNING}; then
+		echo "### CPU Pinning for BP1 on CPU Core ${_PINBP1} for VM ${_NAME}" |& tee -a ${_LOGS}
+		taskset -pc ${_PINBP1} ${_PIDBP1} |& tee -a ${_LOGS}
+		echo "### CPU Pinning for BP2 on CPU Core ${_PINBP2} for VM ${_NAME}" |& tee -a ${_LOGS}
+		taskset -pc ${_PINBP2} ${_PIDBP2} |& tee -a ${_LOGS}
+	fi
+	echo "### CPU Pinning for vFAB on CPU Core ${_PINVFAB1} for VM ${_NAME}" |& tee -a ${_LOGS}
+	taskset -pc ${_PINVFAB1} ${_PIDVFAB1} |& tee -a ${_LOGS}
+	echo "### CPU Pinning for EXT on CPU Core ${_PINEXT1} for VM ${_NAME}" |& tee -a ${_LOGS}
+	taskset -pc ${_PINEXT1} ${_PIDEXT1} |& tee -a ${_LOGS}
+	echo "### Finished vHost CPU Pinning at $(date)" |& tee -a ${_LOGS}
 }
 
 main "$@"
