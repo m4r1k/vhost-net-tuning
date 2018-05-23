@@ -17,6 +17,10 @@ set -xe
 
 main()
 {
+
+	# Trap for any error during execution
+	trap 'err_report $LINENO' ERR
+
 	# Record Starting time
 	_DATE=$(date)
 
@@ -133,6 +137,10 @@ main()
 
 disable_multiqueue()
 {
+
+	# Trap for any error during execution
+	trap 'err_report $LINENO' ERR
+
 	echo "### Starting Disable MultiQueue at $(date)" |& tee -a ${_LOGS}
 	# Disable Multi-Queue for every physical interface member of the bond
 	_BOND=$(vif list --get 0 | awk '/vif0\/0/ {print $3}')
@@ -158,6 +166,10 @@ disable_multiqueue()
 
 irq_pinning()
 {
+
+	# Trap for any error during execution
+	trap 'err_report $LINENO' ERR
+
 	echo "### Starting IRQ Pinning at $(date)" |& tee -a ${_LOGS}
 	_IRQBALANCE_ARGS="IRQBALANCE_ARGS=\""
 	_IRQLIST=""
@@ -181,13 +193,9 @@ irq_pinning()
 	_IRQBALANCE_ARGS="$(echo ${_IRQBALANCE_ARGS}\")"
 	echo "### Making sure IRQBalancer exclude those IRQ(s) - ${_IRQLIST}" |& tee -a ${_LOGS}
 	# Verify if IRQBalancer has the current IRQ Balancer Ban configuration
-	grep -q -E "${_IRQBALANCE_ARGS}" /etc/sysconfig/irqbalance
-	if [[ "$?" != "0" ]]; then
-		# Verify if there aren't any previous old configuration and removing it
-		grep -q -E "^IRQBALANCE_ARGS=.*$" /etc/sysconfig/irqbalance
-		if [[ "$?" != "0" ]]; then
-			sed -e "s/^IRQBALANCE_ARGS=.*$//g" -i /etc/sysconfig/irqbalance
-		fi
+	if [[ "$(grep -E "^${_IRQBALANCE_ARGS}$" /etc/sysconfig/irqbalance || true)" != "${_IRQBALANCE_ARGS}" ]]; then
+		# Remove any previous old configuration 
+		sed -e "s/^IRQBALANCE_ARGS=.*$//g" -i /etc/sysconfig/irqbalance || true
 		# Inject good IRQ Balancer ban configuration
 		echo "${_IRQBALANCE_ARGS}" >> /etc/sysconfig/irqbalance
 		# Restart IRQ Balancer
@@ -210,6 +218,10 @@ irq_pinning()
 
 disable_ksm()
 {
+
+	# Trap for any error during execution
+	trap 'err_report $LINENO' ERR
+
 	# Disable KSM in the Compute Node
 	echo "### Starting Disable KSM at $(date)" |& tee -a ${_LOGS}
 	for _SERVICE in "ksm.service" "ksmtuned.service"
@@ -227,6 +239,10 @@ disable_ksm()
 
 qemu_affinity()
 {
+
+	# Trap for any error during execution
+	trap 'err_report $LINENO' ERR
+
 	echo "### Starting QEMU EMulation Thread Affinity at $(date)" |& tee -a ${_LOGS}
 	_QEMUCORES="$1"
 	_NUMA="$2"
@@ -241,6 +257,10 @@ qemu_affinity()
 
 vhost_pinning()
 {
+
+	# Trap for any error during execution
+	trap 'err_report $LINENO' ERR
+
 	echo "### Starting vHost CPU Pinning at $(date)" |& tee -a ${_LOGS}
 	_PINBP1="$1"
 	_PINBP2="$2"
@@ -282,6 +302,14 @@ vhost_pinning()
 	taskset -pc "${_PINEXT1}" "${_PIDEXT1}" |& tee -a ${_LOGS}
 	echo "### Finished vHost CPU Pinning at $(date)" |& tee -a ${_LOGS}
 }
+
+err_report() {
+    echo "ERROR ON LINE $1" |& tee -a ${_LOGS}
+    echo "VHOST-NET TUNING TERMINATED!" |& tee -a ${_LOGS}
+}
+
+# Trap for any error during execution
+trap 'err_report $LINENO' ERR
 
 main "$@"
 
