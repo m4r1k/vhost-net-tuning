@@ -219,8 +219,8 @@ disable_ksm()
 qemu_affinity()
 {
 	echo "### Starting QEMU EMulation Thread Affinity at $(date)" |& tee -a ${_LOGS}
-	_QEMUCORES=$1
-	_NUMA=$2
+	_QEMUCORES="$1"
+	_NUMA="$2"
 	# Check the QEMU Emulation Threads affinity and don't do anything if it already has the right one
 	# Virsh CLI is NOT idempotent.
 	if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep "${_QEMUCORES}" | awk '{print $2}')" != "${_QEMUCORES}" ]]; then
@@ -233,10 +233,10 @@ qemu_affinity()
 vhost_pinning()
 {
 	echo "### Starting vHost CPU Pinning at $(date)" |& tee -a ${_LOGS}
-	_PINBP1=$1
-	_PINBP2=$2
-	_PINVFAB1=$3
-	_PINEXT1=$4
+	_PINBP1="$1"
+	_PINBP2="$2"
+	_PINVFAB1="$3"
+	_PINEXT1="$4"
 	# The vHost-Net kernel thread has the following format
 	# vhost-<KVM Domain main PID>
 	# Given this, look for any vHost-Net PID, the output from tuna is already sorted by PID, but do it again
