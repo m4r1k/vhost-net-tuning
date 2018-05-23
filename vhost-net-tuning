@@ -1,0 +1,13 @@
+/var/log/vhost-net-tuning.log {
+    compress
+    copytruncate
+    missingok
+    rotate 60
+}
+
+/var/log/vhost-net-tuning_debug.log {
+    compress
+    copytruncate
+    missingok
+    rotate 60
+}
