@@ -103,18 +103,18 @@ main()
 			if [[ "${_NUMA}" == "0" ]]; then
 
 				# Move to function for qemu_affinity
-				qemu_affinity ${_QEMUCORESNUMA0} ${_NUMA}
+				qemu_affinity "${_QEMUCORESNUMA0}" "${_NUMA}"
 
 				# Move to function for vhost_pinning
-				vhost_pinning ${_PINBP1NUMA0} ${_PINBP2NUMA0} ${_PINVFAB1NUMA0} ${_PINEXT1NUMA0}
+				vhost_pinning "${_PINBP1NUMA0}" "${_PINBP2NUMA0}" "${_PINVFAB1NUMA0}" "${_PINEXT1NUMA0}"
 
 			elif [[ "${_NUMA}" == "1" ]]; then
 
 				# Move to function for qemu_affinity
-				qemu_affinity ${_QEMUCORESNUMA1} ${_NUMA}
+				qemu_affinity "${_QEMUCORESNUMA1}" "${_NUMA}"
 
 				# Move to function for vhost_pinning
-				vhost_pinning ${_PINBP1NUMA1} ${_PINBP2NUMA1} ${_PINVFAB1NUMA1} ${_PINEXT1NUMA1}
+				vhost_pinning "${_PINBP1NUMA1}" "${_PINBP2NUMA1}" "${_PINVFAB1NUMA1}" "${_PINEXT1NUMA1}"
 
 			fi
 		fi
@@ -153,6 +153,7 @@ irq_pinning()
 	_IRQBALANCE_ARGS="IRQBALANCE_ARGS=\""
 	_IRQLIST=""
 	_BOND=$(vif list --get 0 | awk '/vif0\/0/ {print $3}')
+	echo "### Generating IRQ List for any interface in the ${_BOND} LAG" |& tee -a ${_LOGS}
 	for _SLAVE in $(cat /sys/class/net/${_BOND}/bonding/slaves);
 	do
 		for _IRQ in $(tuna --show_irqs | grep ${_SLAVE} | awk '{print $1}')
@@ -169,7 +170,7 @@ irq_pinning()
 		done
 	done
 	_IRQBALANCE_ARGS="$(echo ${_IRQBALANCE_ARGS}\")"
-	echo "### IRQ Pinning for any interface in the ${_BOND} LAG" |& tee -a ${_LOGS}
+	echo "### Making sure IRQBalancer exclude those IRQ(s) - ${_IRQLIST}" |& tee -a ${_LOGS}
 	# Verify if IRQBalancer has the current IRQ Balancer Ban configuration
 	grep -q -E "${_IRQBALANCE_ARGS}" /etc/sysconfig/irqbalance
 	if [[ "$?" != "0" ]]; then
@@ -184,9 +185,17 @@ irq_pinning()
 		systemctl restart irqbalance.service |& tee -a ${_LOGS}
 		# Wait a few seconds
 		sleep 5s
-		# Do IRQ Affinity
-		tuna --irqs=${_IRQLIST} --cpus=${_IRQCORE} --move |& tee -a ${_LOGS}
 	fi
+
+	IFS=","
+	for _SINGLEIRQ in ${_IRQLIST}
+	do
+		if [[ "$(tuna --show_irqs | awk -v irq=${_SINGLEIRQ} '{if ($1 == irq) {print $3}}')" != "${_IRQCORE}" ]]; then
+			echo "### Pinning ${_SINGLEIRQ} to CPU Core ${_IRQCORE}" |& tee -a ${_LOGS}
+			# Do IRQ Affinity
+			tuna --irqs=${_SINGLEIRQ} --cpus=${_IRQCORE} --move |& tee -a ${_LOGS}
+		fi
+	done
 	echo "### Finished IRQ Pinning at $(date)" |& tee -a ${_LOGS}
 }
 
@@ -214,9 +223,9 @@ qemu_affinity()
 	_NUMA=$2
 	# Check the QEMU Emulation Threads affinity and don't do anything if it already has the right one
 	# Virsh CLI is NOT idempotent.
-	if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep ${_QEMUCORES} | awk '{print $2}')" != "${_QEMUCORES}" ]]; then
+	if [[ "$(virsh emulatorpin --domain ${_DOMAIN} | grep "${_QEMUCORES}" | awk '{print $2}')" != "${_QEMUCORES}" ]]; then
 		echo "### QEMU Emulation Threads affinity on CPU Cores ${_QEMUCORES} on NUMA${_NUMA} for VM ${_NAME}" |& tee -a ${_LOGS}
-		virsh emulatorpin --domain ${_DOMAIN} --cpulist ${_QEMUCORES} --live |& tee -a ${_LOGS}
+		virsh emulatorpin --domain ${_DOMAIN} --cpulist "${_QEMUCORES}" --live |& tee -a ${_LOGS}
 	fi
 	echo "### Finished QEMU EMulation Thread Affinity at $(date)" |& tee -a ${_LOGS}
 }
@@ -242,26 +251,26 @@ vhost_pinning()
 
 	# For each vHost-Net PID, add it to the CGROUP CPU and then change the process scheduling from SCHED_OTHER priority 0 to SCHED_FIFO priority 99
 	# The For loop ignore empty variables, if BP Pinning is disabled where will not be any error
-	for _VHOSTPID in ${_PIDBP1} ${_PIDBP2} ${_PIDVFAB1} ${_PIDEXT1}
+	for _VHOSTPID in "${_PIDBP1}" "${_PIDBP2}" "${_PIDVFAB1}" "${_PIDEXT1}"
 	do
 		echo "### Set SCHED_FIFO for vHost NET Kernel Threads having PID ${_VHOSTPID} for VM ${_NAME}" |& tee -a ${_LOGS}
 		# Both cgclassify and tuna are idempotent.
-		cgclassify -g cpu:/ ${_VHOSTPID} |& tee -a ${_LOGS}
-		tuna --threads=${_VHOSTPID} --priority=FIFO:99 |& tee -a ${_LOGS}
+		cgclassify -g cpu:/ "${_VHOSTPID}" |& tee -a ${_LOGS}
+		tuna --threads="${_VHOSTPID}" --priority=FIFO:99 |& tee -a ${_LOGS}
 	done
 
 	# Lastly, do CPU Pinning for each vHost-Net PID as per the static CPU Mapping defined above
 	# Taskset is idempotent.
 	if ${_BPPINNING}; then
 		echo "### CPU Pinning for BP1 on CPU Core ${_PINBP1} for VM ${_NAME}" |& tee -a ${_LOGS}
-		taskset -pc ${_PINBP1} ${_PIDBP1} |& tee -a ${_LOGS}
+		taskset -pc "${_PINBP1}" "${_PIDBP1}" |& tee -a ${_LOGS}
 		echo "### CPU Pinning for BP2 on CPU Core ${_PINBP2} for VM ${_NAME}" |& tee -a ${_LOGS}
-		taskset -pc ${_PINBP2} ${_PIDBP2} |& tee -a ${_LOGS}
+		taskset -pc "${_PINBP2}" "${_PIDBP2}" |& tee -a ${_LOGS}
 	fi
 	echo "### CPU Pinning for vFAB on CPU Core ${_PINVFAB1} for VM ${_NAME}" |& tee -a ${_LOGS}
-	taskset -pc ${_PINVFAB1} ${_PIDVFAB1} |& tee -a ${_LOGS}
+	taskset -pc "${_PINVFAB1}" "${_PIDVFAB1}" |& tee -a ${_LOGS}
 	echo "### CPU Pinning for EXT on CPU Core ${_PINEXT1} for VM ${_NAME}" |& tee -a ${_LOGS}
-	taskset -pc ${_PINEXT1} ${_PIDEXT1} |& tee -a ${_LOGS}
+	taskset -pc "${_PINEXT1}" "${_PIDEXT1}" |& tee -a ${_LOGS}
 	echo "### Finished vHost CPU Pinning at $(date)" |& tee -a ${_LOGS}
 }
 
