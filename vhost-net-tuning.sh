@@ -226,7 +226,8 @@ disable_ksm()
 	echo "### Starting Disable KSM at $(date)" |& tee -a ${_LOGS}
 	for _SERVICE in "ksm.service" "ksmtuned.service"
 	do
-		if [[ "$(/bin/systemctl is-active ${_SERVICE} || true)" != "inactive" ]]; then
+		if [[ "$(/bin/systemctl is-active ${_SERVICE} | grep -E -v "inactive|unknown" || true)" != "" ]]; then
+
 			echo "### Disabling ${_SERVICE}" |& tee -a ${_LOGS}
 			/bin/systemctl disable ${_SERVICE} |& tee -a ${_LOGS}
 			/bin/systemctl stop ${_SERVICE} |& tee -a ${_LOGS}
