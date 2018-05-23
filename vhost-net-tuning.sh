@@ -17,6 +17,9 @@ set -xe
 
 main()
 {
+	# Record Starting time
+	_DATE=$(date)
+
 	# LOG FILE
 	_LOGS="/var/log/vhost-net-tuning.log"
 	
@@ -63,9 +66,6 @@ main()
 	# For each KVM Domain do the following
 	for _DOMAIN in $(virsh list | awk '/running/ {print $2}')
 	do
-		echo "##########" |& tee -a ${_LOGS}
-		echo "### vHost Net Tuning initialized at $(date)" |& tee -a ${_LOGS}
-
 		# Get VM Name and check it against a RegEx
 		_NAME=$(virsh dumpxml ${_DOMAIN} | grep nova:name | sed -e 's/<[^>]*>//g' -e 's/  //g')
 		_NAMESTATUS=$(echo ${_NAME} | grep -E -q "${_NAMEPATTERN}" && echo true || echo false)
@@ -77,9 +77,13 @@ main()
 		# If both NAME and PROJECT match the defined criterias go ahead
 		if ${_NAMESTATUS} && ${_PROJECTSTATUS}; then
 
-			echo "### This Compute node has an Ericsson vEPG running - ${_NAME}" |& tee -a ${_LOGS}
-
 			if ! ${_COMPUTETUNING}; then
+
+				echo "##########" |& tee -a ${_LOGS}
+				echo "### vHost Net Tuning initialized at ${_DATE}" |& tee -a ${_LOGS}
+
+				echo "### Started Compute Host Tuning at $(date)" |& tee -a ${_LOGS}
+
 				# Move to function for disable_multiqueue
 				disable_multiqueue
 
@@ -93,8 +97,12 @@ main()
 
 				# Make sure to not re-executure this section of function more then one
 				_COMPUTETUNING=true
+
+				echo "### Finished Compute Host Tuning at $(date)" |& tee -a ${_LOGS}
 			fi
-	
+
+			echo "### This Compute node has an Ericsson vEPG VM running - ${_NAME}" |& tee -a ${_LOGS}
+
 			# Take the KVM Domain PID
 			_DOMAINPID=$(ps aux | grep ${_DOMAIN} | grep -v grep | awk '{print $2}')
 
@@ -117,9 +125,10 @@ main()
 				vhost_pinning "${_PINBP1NUMA1}" "${_PINBP2NUMA1}" "${_PINVFAB1NUMA1}" "${_PINEXT1NUMA1}"
 
 			fi
+
+			echo "### vHost Net Tuning successfully completed at $(date)" |& tee -a ${_LOGS}
 		fi
 	done
-	echo "### vHost Net Tuning successfully completed at $(date)" |& tee -a ${_LOGS}
 }
 
 disable_multiqueue()
@@ -205,7 +214,7 @@ disable_ksm()
 	echo "### Starting Disable KSM at $(date)" |& tee -a ${_LOGS}
 	for _SERVICE in "ksm.service" "ksmtuned.service"
 	do
-		if [[ "$(/bin/systemctl is-enabled ${_SERVICE} || true)" != "disabled" ]]; then
+		if [[ "$(/bin/systemctl is-active ${_SERVICE} || true)" != "inactive" ]]; then
 			echo "### Disabling ${_SERVICE}" |& tee -a ${_LOGS}
 			/bin/systemctl disable ${_SERVICE} |& tee -a ${_LOGS}
 			/bin/systemctl stop ${_SERVICE} |& tee -a ${_LOGS}
