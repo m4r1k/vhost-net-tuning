@@ -305,8 +305,9 @@ vhost_pinning()
 }
 
 err_report() {
-    echo "ERROR ON LINE $1" |& tee -a ${_LOGS}
-    echo "VHOST-NET TUNING TERMINATED!" |& tee -a ${_LOGS}
+	echo "ERROR ON LINE $1" |& tee -a ${_LOGS}
+	echo "VHOST-NET TUNING TERMINATED!" |& tee -a ${_LOGS}
+	exit 1
 }
 
 # Trap for any error during execution
